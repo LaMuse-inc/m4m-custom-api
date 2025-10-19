@@ -24,7 +24,16 @@ module.exports = async (req, res) => {
     return;
   }
 
-  // Only accept POST requests
+  // Handle GET request (for webhook verification)
+  if (req.method === 'GET') {
+    res.status(200).json({ 
+      status: 'ok',
+      message: 'M4M LINE Webhook is running' 
+    });
+    return;
+  }
+
+  // Only accept POST requests for webhook events
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
@@ -33,13 +42,29 @@ module.exports = async (req, res) => {
   try {
     // Verify LINE signature
     const signature = req.headers['x-line-signature'];
+    
+    // LINE webhook verification might not have signature
+    // Return 200 OK for verification requests
     if (!signature) {
-      res.status(401).json({ error: 'No signature' });
+      console.log('No signature - might be verification request');
+      res.status(200).json({ 
+        status: 'ok',
+        message: 'Webhook received' 
+      });
       return;
     }
 
     // Parse events
     const events = req.body.events || [];
+    
+    // If no events, return success (verification request)
+    if (events.length === 0) {
+      res.status(200).json({ 
+        status: 'ok',
+        message: 'No events to process' 
+      });
+      return;
+    }
     
     // Process each event
     const results = await Promise.all(
@@ -53,9 +78,11 @@ module.exports = async (req, res) => {
 
   } catch (error) {
     console.error('Webhook error:', error);
-    res.status(500).json({ 
-      error: 'Internal server error',
-      message: error.message 
+    
+    // Return 200 even on error to avoid LINE retrying
+    res.status(200).json({ 
+      success: false,
+      error: error.message 
     });
   }
 };
@@ -93,7 +120,7 @@ async function handleMessage(event) {
     
     // Send to Dify for processing
     try {
-      const difyResponse = await sendToDify(userId, userMessage);
+      const difyResponse = await sendToDify(userId, userMessage, 'message');
       
       // Reply to user
       await client.replyMessage(replyToken, {
@@ -149,22 +176,52 @@ async function handleFollow(event) {
   
   console.log('New follower:', userId);
   
-  // Send welcome message
-  await client.replyMessage(replyToken, {
-    type: 'text',
-    text: 'M4M OEM受注システムへようこそ！\n\nオリジナルアパレル製作のご相談を承ります。\n\nまずはデザインイメージをお送りください。'
-  });
-  
-  // TODO: Create customer record in Airtable
-  
-  return { success: true };
+  try {
+    // 1. Get LINE profile information
+    const profile = await client.getProfile(userId);
+    console.log('Profile:', JSON.stringify(profile));
+    
+    // 2. Register customer to Airtable
+    await registerCustomerToAirtable({
+      line_user_id: userId,
+      line_display_name: profile.displayName,
+      status: 'active',
+      created_at: new Date().toISOString()
+    });
+    
+    // 3. Notify Dify about new follower
+    await sendToDify(userId, `[SYSTEM] 友だち追加: ${profile.displayName}`, 'follow');
+    
+    // 4. Send welcome message
+    await client.replyMessage(replyToken, {
+      type: 'text',
+      text: `${profile.displayName}さん、友だち追加ありがとうございます！🎉\n\nM4Mアパレル OEM受注システムへようこそ。\n\nデザイン画像を送っていただければ、お見積もりを作成いたします。\n\n何かご質問があれば、お気軽にメッセージをお送りください。`
+    });
+    
+    return { success: true, userId, registered: true };
+    
+  } catch (error) {
+    console.error('Error in handleFollow:', error);
+    
+    // エラーでも基本的なウェルカムメッセージは送信
+    try {
+      await client.replyMessage(replyToken, {
+        type: 'text',
+        text: '友だち追加ありがとうございます！'
+      });
+    } catch (replyError) {
+      console.error('Error sending welcome message:', replyError);
+    }
+    
+    return { success: false, error: error.message };
+  }
 }
 
 /**
  * Send message to Dify for AI processing
  */
-async function sendToDify(userId, message) {
-  const DIFY_API_URL = 'https://api.dify.ai/v1/workflows/run';
+async function sendToDify(userId, message, eventType = 'message') {
+  const DIFY_API_URL = process.env.DIFY_WORKFLOW_URL || 'https://api.dify.ai/v1/workflows/run';
   const DIFY_API_KEY = process.env.DIFY_API_KEY || '';
   
   if (!DIFY_API_KEY) {
@@ -177,7 +234,7 @@ async function sendToDify(userId, message) {
       {
         inputs: {
           message: message,
-          user_id: userId
+          event_type: eventType
         },
         response_mode: 'blocking',
         user: userId
@@ -197,6 +254,42 @@ async function sendToDify(userId, message) {
   } catch (error) {
     console.error('Dify API error:', error.response?.data || error.message);
     throw error;
+  }
+}
+
+/**
+ * Register customer to Airtable
+ */
+async function registerCustomerToAirtable(customerData) {
+  const AIRTABLE_API_KEY = process.env.AIRTABLE_API_KEY || '';
+  const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID || '';
+  
+  if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
+    console.error('Airtable credentials not configured');
+    return null;
+  }
+  
+  try {
+    const response = await axios.post(
+      `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Customers`,
+      {
+        fields: customerData
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${AIRTABLE_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    
+    console.log('Customer registered to Airtable:', response.data.id);
+    return response.data;
+    
+  } catch (error) {
+    console.error('Airtable registration error:', error.response?.data || error.message);
+    // Airtableエラーは致命的ではないため、ログのみ
+    return null;
   }
 }
 
