@@ -1,0 +1,4 @@
+product_id,category,maker_name,product_code,product_name,description,image_url,available_colors,available_sizes,base_price,is_active
+1,Tシャツ,United Athle,5001-01,5.6オンス ハイクオリティーTシャツ,定番の高品質Tシャツ,https://example.com/product1.jpg,"ブラック,ホワイト,グレー","S,M,L,XL",1200,TRUE
+2,パーカー,Printstar,00183-NSC,スタンダードプルパーカー,裏毛素材の定番パーカー,https://example.com/product2.jpg,"ブラック,ネイビー,グレー","M,L,XL",2800,TRUE
+

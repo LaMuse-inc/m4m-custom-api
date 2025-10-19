@@ -1,0 +1,3 @@
+address_id,customer_id,order_id,full_name,postal_code,prefecture,city,address_line1,address_line2,phone
+1,1,1,山田太郎,150-0001,東京都,渋谷区,神宮前1-2-3,サンプルビル401,03-1234-5678
+
