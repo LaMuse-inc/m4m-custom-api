@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/**/*.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    }
+  ],
+  "env": {
+    "AIRTABLE_API_KEY": "@airtable_api_key",
+    "AIRTABLE_BASE_ID": "@airtable_base_id",
+    "LINE_CHANNEL_SECRET": "@line_channel_secret",
+    "LINE_CHANNEL_ACCESS_TOKEN": "@line_channel_access_token",
+    "OPENAI_API_KEY": "@openai_api_key"
+  }
+}
+
